@@ -4,7 +4,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const { Client, GatewayIntentBits, Events } = require('discord.js');
 const { handlers, handleAutocomplete, handleButton } = require('./commands');
 const { startAnnouncer } = require('./announcer');
-const db = require('../server/db');
+const db = require('./server/db');
 
 if (!db.isAvailable()) {
   console.error('[bot] better-sqlite3 n\'est pas installé. Lance `npm install` à la racine du projet avant de démarrer le bot.');

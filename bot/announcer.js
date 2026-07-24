@@ -1,7 +1,7 @@
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
-const db = require('../server/db');
+const db = require('./server/db');
 
 const ACCENT = 0x9b6cff;
 const POLL_INTERVAL_MS = 8000;
