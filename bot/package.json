@@ -1,0 +1,25 @@
+{
+  "name": "bot",
+  "version": "1.0.0",
+  "description": "Le bot partage la même base de données que le dashboard (`data/apex.db`, créée automatiquement, via le SQLite intégré à Node.js — aucune dépendance à compiler, aucun Python ni outil de build nécessaire). Chaque tour validé dans le dashboard est enregistré et devient consultable depuis Discord.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xayone4-creator/APEX-Bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/xayone4-creator/APEX-Bot/issues"
+  },
+  "homepage": "https://github.com/xayone4-creator/APEX-Bot#readme",
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  }
+}
