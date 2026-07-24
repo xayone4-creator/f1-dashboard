@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const db = require('./server/db');
-const { trackName, trackIdByName, TRACKS } = require('../server/state');
+const { trackName, trackIdByName, TRACKS } = require('./server/state');
 
 const ACCENT = 0x9b6cff;
 
