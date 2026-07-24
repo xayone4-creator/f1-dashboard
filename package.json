@@ -1,0 +1,21 @@
+{
+  "name": "f1-25-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard de télémétrie live pour F1 25 (carte du circuit, delta, comparaison de tours, overlay OBS) + bot Discord",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "bot": "node bot/index.js",
+    "deploy-commands": "node bot/deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
