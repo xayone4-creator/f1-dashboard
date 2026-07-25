@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 // Reçoit les tours poussés par le dashboard local (voir server/index.js,
 // fonction pushLapToBot) et les enregistre dans la base du bot, pour que
@@ -34,6 +34,14 @@ function startIngestServer({ port, secret }) {
       sector2Ms: sector2Ms ?? null,
       sector3Ms: sector3Ms ?? null,
     });
+    // C'est ici, et pas côté dashboard local, qu'il faut déposer l'annonce :
+    // announcer.js (bot/announcer.js) la lit dans CETTE base (celle du bot
+    // sur Railway), pas dans celle du dashboard local.
+    if (saved?.isNewRecord) {
+      db.queueAnnouncement('new_record', {
+        driverName, trackName: trackName || null, lapTimeMs, previousBest: saved.previousBest, at: Date.now(),
+      });
+    }
     return res.json({ ok: true, saved });
   });
 
