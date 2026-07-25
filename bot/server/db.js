@@ -23,7 +23,12 @@ try {
   // démarrer tant que Node n'est pas mis à jour (voir bot/README.md).
 }
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'apex.db');
+// Sur Railway, le bot tourne seul (pas à côté du dashboard) : sa base est
+// donc la sienne, propre. DB_PATH est surchargeable via la variable d'env
+// DB_PATH pour la faire pointer vers un Volume Railway monté (persistance
+// entre les redéploiements) — sinon elle reste dans bot/data/apex.db, qui
+// sera réinitialisée à chaque redéploiement si aucun Volume n'est attaché.
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'apex.db');
 
 let db = null;
 

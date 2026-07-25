@@ -23,7 +23,8 @@
   "homepage": "https://github.com/xayone4-creator/APEX-Bot#readme",
   "dependencies": {
     "discord.js": "^14.27.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2"
   }
 }
 

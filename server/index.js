@@ -1,5 +1,6 @@
 'use strict';
 
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const dgram = require('dgram');
 const path = require('path');
 const express = require('express');
@@ -201,10 +202,33 @@ function archiveLap(lapNumber, lapTimeMs, previousLap) {
     lapTimeMs, sector1Ms: sector1 || null, sector2Ms: sector2 || null, sector3Ms: sector3 || null,
   });
   if (saved?.isNewRecord) notifyNewRecord({ driverName, trackName: state.session?.trackName, lapTimeMs, previousBest: saved.previousBest });
+  pushLapToBot({
+    driverName, trackId: state.session?.trackId ?? null, trackName: state.session?.trackName || null,
+    sessionType: state.session?.sessionType ?? null, lapTimeMs, sector1Ms: sector1 || null, sector2Ms: sector2 || null, sector3Ms: sector3 || null,
+  });
 
   const trackId = state.session && state.session.trackId;
   if (trackId !== undefined && tracks.saveOutlineIfBetter(trackId, trail)) {
     broadcast({ type: 'trackOutline', trackId, points: trail });
+  }
+}
+
+// Envoie le tour au bot Discord (hébergé sur Railway, donc sans accès au
+// disque local) via son API d'ingestion. Best-effort : ne bloque jamais la
+// boucle UDP, et un échec (bot éteint, pas d'internet...) est juste loggé.
+async function pushLapToBot(lap) {
+  const url = process.env.BOT_INGEST_URL;
+  const secret = process.env.BOT_INGEST_SECRET;
+  if (!url || !secret) return; // non configuré : le dashboard fonctionne quand même en local
+  try {
+    const res = await fetch(`${url.replace(/\/$/, '')}/api/laps`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-ingest-secret': secret },
+      body: JSON.stringify(lap),
+    });
+    if (!res.ok) console.warn(`[bot-sync] réponse ${res.status} du bot Railway`);
+  } catch (err) {
+    console.warn('[bot-sync] échec envoi du tour au bot Railway:', err.message);
   }
 }
 

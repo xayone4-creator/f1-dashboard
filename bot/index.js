@@ -4,6 +4,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const { Client, GatewayIntentBits, Events } = require('discord.js');
 const { handlers, handleAutocomplete, handleButton } = require('./commands');
 const { startAnnouncer } = require('./announcer');
+const { startIngestServer } = require('./server/ingest');
 const db = require('./server/db');
 
 if (!db.isAvailable()) {
@@ -13,6 +14,16 @@ if (!db.isAvailable()) {
 if (!process.env.DISCORD_TOKEN) {
   console.error('[bot] Variable DISCORD_TOKEN manquante. Copie bot/.env.example vers bot/.env et renseigne ton token.');
   process.exit(1);
+}
+
+// Serveur HTTP qui reçoit les tours poussés par le dashboard local (voir
+// server/ingest.js). Nécessite INGEST_SECRET (même valeur des deux côtés)
+// et un port exposé publiquement par Railway (variable PORT fournie
+// automatiquement par Railway).
+if (process.env.INGEST_SECRET) {
+  startIngestServer({ port: parseInt(process.env.PORT || '3001', 10), secret: process.env.INGEST_SECRET });
+} else {
+  console.warn('[bot] INGEST_SECRET manquant : le bot ne recevra pas les tours poussés par le dashboard local.');
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
