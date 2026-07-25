@@ -45,9 +45,44 @@
   .wear-pct{font:10px 'DM Mono',monospace;color:#c7cad1;min-width:30px;text-align:right;}
   .speed-bar{height:6px;border-radius:4px;background:#1c1e26;margin-top:11px;overflow:hidden;}
   .speed-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green));width:0%;transition:width .12s ease;}
+
+  /* Notification de nouveau record */
+  #recordToast{
+    position:fixed;top:28px;left:50%;
+    width:420px;margin-left:-210px;
+    background:linear-gradient(180deg,rgba(20,17,10,.95),rgba(12,10,6,.95));
+    border:1px solid rgba(248,213,116,.55);border-radius:14px;
+    padding:16px 20px;box-shadow:0 0 0 0 rgba(248,213,116,.4),0 20px 45px rgba(0,0,0,.45);
+    opacity:0;pointer-events:none;transform:translateY(-24px) scale(.96);
+    transition:opacity .35s ease,transform .35s ease;
+    z-index:50;
+  }
+  #recordToast.show{opacity:1;transform:translateY(0) scale(1);animation:recordGlow 1.4s ease-out;}
+  @keyframes recordGlow{
+    0%{box-shadow:0 0 0 0 rgba(248,213,116,.55),0 20px 45px rgba(0,0,0,.45);}
+    50%{box-shadow:0 0 34px 6px rgba(248,213,116,.45),0 20px 45px rgba(0,0,0,.45);}
+    100%{box-shadow:0 0 0 0 rgba(248,213,116,0),0 20px 45px rgba(0,0,0,.45);}
+  }
+  #recordToast .toast-top{display:flex;align-items:center;gap:8px;}
+  #recordToast .flag{font-size:18px;line-height:1;}
+  #recordToast .toast-label{font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--yellow);}
+  #recordToast .toast-driver{margin-top:6px;font-size:20px;font-weight:800;letter-spacing:.3px;color:#fff;}
+  #recordToast .toast-sub{margin-top:2px;font-size:11px;color:#c7cad1;}
+  #recordToast .toast-bottom{display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);}
+  #recordToast .toast-time{font-size:26px;font-weight:700;}
+  #recordToast .toast-gain{font-size:16px;font-weight:700;color:var(--green);text-align:right;}
 </style>
 </head>
 <body>
+  <div id="recordToast">
+    <div class="toast-top"><span class="flag">🏁</span><span class="toast-label mono">NOUVEAU RECORD PERSONNEL</span></div>
+    <div class="toast-driver" id="toastDriver">—</div>
+    <div class="toast-sub" id="toastTrack">—</div>
+    <div class="toast-bottom">
+      <div class="toast-time mono" id="toastTime">0:00.000</div>
+      <div class="toast-gain mono" id="toastGain">-0.000</div>
+    </div>
+  </div>
   <div class="card" id="card">
     <div class="top-row">
       <span class="pos mono" id="pos">P—</span>

@@ -157,6 +157,14 @@ function pushSample(distance, telemetry, lapTimeMs) {
 
 function notifyNewRecord({ driverName, trackName: track, lapTimeMs, previousBest }) {
   db.queueAnnouncement('new_record', { driverName, trackName: track, lapTimeMs, previousBest, at: Date.now() });
+  broadcast({
+    type: 'newRecord',
+    driverName,
+    trackName: track || null,
+    lapTimeMs,
+    previousBest: previousBest ?? null,
+    gainMs: previousBest != null ? previousBest - lapTimeMs : null,
+  });
 }
 
 function archiveLap(lapNumber, lapTimeMs, previousLap) {

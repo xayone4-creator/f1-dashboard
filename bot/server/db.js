@@ -99,6 +99,18 @@ function ensureDb() {
       created_at INTEGER NOT NULL,
       announced INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS challenges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      track_id INTEGER,
+      track_name TEXT,
+      created_by TEXT NOT NULL,
+      starts_at INTEGER NOT NULL,
+      ends_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_challenges_guild ON challenges(guild_id, status);
   `);
   // Nettoyage ponctuel : purge les tours à 0/négatifs enregistrés avant le
   // correctif du bug de coupure UDP (ils faussaient les classements en
@@ -184,6 +196,85 @@ function driverStats(driverName) {
     SELECT track_id, track_name, MIN(lap_time_ms) AS best FROM laps WHERE driver_name = ? GROUP BY track_id
   `).all(driverName);
   return { ...totals, perTrack };
+}
+
+// --- Carte pilote (façon "carte de visite") --------------------------------
+// Condensé des stats d'un pilote pour un affichage type carte : meilleur
+// tour, circuit favori (le plus roulé), nombre de records détenus (tours où
+// il est actuellement en tête du classement d'un circuit), et dernier tour
+// enregistré.
+
+function driverCard(driverName) {
+  const database = ensureDb(); if (!database) return null;
+  const totals = database.prepare(`
+    SELECT COUNT(*) AS totalLaps, MIN(lap_time_ms) AS bestOverall, COUNT(DISTINCT track_id) AS tracksDriven
+    FROM laps WHERE driver_name = ?
+  `).get(driverName);
+  if (!totals || !totals.totalLaps) return null;
+  const favorite = database.prepare(`
+    SELECT track_id, track_name, COUNT(*) AS laps FROM laps WHERE driver_name = ? GROUP BY track_id ORDER BY laps DESC LIMIT 1
+  `).get(driverName);
+  const recordsHeld = database.prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT track_id, MIN(lap_time_ms) AS best FROM laps GROUP BY track_id
+    ) bests
+    JOIN laps l ON l.track_id = bests.track_id AND l.lap_time_ms = bests.best AND l.driver_name = ?
+  `).get(driverName);
+  const lastLap = database.prepare(`
+    SELECT lap_time_ms, track_id, track_name, recorded_at FROM laps WHERE driver_name = ? ORDER BY recorded_at DESC LIMIT 1
+  `).get(driverName);
+  return { ...totals, favorite: favorite || null, recordsHeld: recordsHeld?.n || 0, lastLap: lastLap || null };
+}
+
+// --- Défi de la semaine ----------------------------------------------------
+// Un seul défi actif par serveur : lancer un nouveau défi ferme
+// automatiquement le précédent. Le classement n'est jamais stocké : il est
+// recalculé à la volée depuis les tours déjà enregistrés dans `laps` (mêmes
+// tours que ceux utilisés par /chrono et /record), filtrés sur la fenêtre de
+// temps et le circuit du défi — donc toujours à jour tout seul.
+
+function createChallenge({ guildId, trackId, trackName, createdBy, durationDays }) {
+  const database = ensureDb(); if (!database) return null;
+  const now = Date.now();
+  const endsAt = now + Math.max(1, durationDays || 7) * 24 * 60 * 60 * 1000;
+  database.prepare("UPDATE challenges SET status = 'closed' WHERE guild_id = ? AND status = 'open'").run(guildId);
+  const info = database.prepare(`
+    INSERT INTO challenges (guild_id, track_id, track_name, created_by, starts_at, ends_at, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
+  `).run(guildId, trackId ?? null, trackName || null, createdBy, now, endsAt, now);
+  return info.lastInsertRowid;
+}
+
+function getActiveChallenge(guildId) {
+  const database = ensureDb(); if (!database) return null;
+  const row = database.prepare(`
+    SELECT * FROM challenges WHERE guild_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1
+  `).get(guildId);
+  if (!row) return null;
+  if (row.ends_at < Date.now()) {
+    database.prepare("UPDATE challenges SET status = 'closed' WHERE id = ?").run(row.id);
+    return null;
+  }
+  return row;
+}
+
+function challengeLeaderboard(challengeId, limit = 10) {
+  const database = ensureDb(); if (!database) return [];
+  const challenge = database.prepare('SELECT * FROM challenges WHERE id = ?').get(challengeId);
+  if (!challenge) return [];
+  return database.prepare(`
+    SELECT driver_name, MIN(lap_time_ms) AS lap_time_ms
+    FROM laps
+    WHERE track_id = ? AND recorded_at BETWEEN ? AND ?
+    GROUP BY driver_name
+    ORDER BY lap_time_ms ASC
+    LIMIT ?
+  `).all(challenge.track_id, challenge.starts_at, challenge.ends_at, limit);
+}
+
+function closeChallenge(challengeId) {
+  const database = ensureDb(); if (!database) return;
+  database.prepare("UPDATE challenges SET status = 'closed' WHERE id = ?").run(challengeId);
 }
 
 // --- Ligues ------------------------------------------------------------
@@ -303,9 +394,10 @@ function listOpenLobbies(guildId) {
 }
 
 module.exports = {
-  isAvailable, recordLap, bestLaps, recordForTrack, driverHistory, driverStats,
+  isAvailable, recordLap, bestLaps, recordForTrack, driverHistory, driverStats, driverCard,
   createLeague, joinLeague, leagueStandings, findLeagueByName, listLeagues,
   createLobby, setLobbyMessage, joinLobby, leaveLobby, getLobby, closeLobby,
   setAnnounceChannel, getAnnounceChannel, listAnnounceChannels, queueAnnouncement, consumePendingAnnouncements,
   linkDriver, linkedDriver, listOpenLobbies,
+  createChallenge, getActiveChallenge, challengeLeaderboard, closeChallenge,
 };

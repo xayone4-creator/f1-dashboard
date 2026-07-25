@@ -17,6 +17,22 @@ function sectorClass(current, reference) {
 }
 function set(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
 
+let recordToastTimer = null;
+function showRecordToast({ driverName, trackName, lapTimeMs, gainMs }) {
+  const toast = document.getElementById('recordToast');
+  set('toastDriver', driverName || 'Pilote');
+  set('toastTrack', trackName ? `Nouveau record sur ${trackName}` : 'Nouveau record');
+  set('toastTime', formatLapTime(lapTimeMs));
+  const gainEl = document.getElementById('toastGain');
+  gainEl.textContent = Number.isFinite(gainMs) ? `-${(gainMs / 1000).toFixed(3)}` : '';
+  toast.classList.remove('show');
+  // force reflow pour rejouer l'animation si deux records tombent vite
+  void toast.offsetWidth;
+  toast.classList.add('show');
+  if (recordToastTimer) clearTimeout(recordToastTimer);
+  recordToastTimer = setTimeout(() => toast.classList.remove('show'), 6000);
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -25,6 +41,11 @@ function connect() {
   ws.onmessage = (evt) => {
     const msg = JSON.parse(evt.data);
     if (msg.type === 'lapList') { const times = msg.laps.map((l) => l.lapTimeMs).filter(Boolean); if (times.length) bestLapMs = Math.min(...times); return; }
+    if (msg.type === 'newRecord') {
+      bestLapMs = msg.lapTimeMs;
+      showRecordToast(msg);
+      return;
+    }
     if (msg.type !== 'live') return;
     const me = msg.cars.find((c) => c.index === msg.playerCarIndex);
     if (!me || !me.lap) return;

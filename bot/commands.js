@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const db = require('./server/db');
-const { trackName, trackIdByName, TRACKS } = require('./server/state');
+const { trackName, trackIdByName, TRACKS, teamColor } = require('./server/state');
 
 const ACCENT = 0x9b6cff;
 
@@ -11,6 +11,17 @@ function formatLapTime(ms) {
   const m = Math.floor(ms / 60000);
   const s = (ms % 60000) / 1000;
   return `${m}:${s.toFixed(3).padStart(6, '0')}`;
+}
+
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/);
+  return parts.map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '—';
+}
+
+function pilotColor(name) {
+  let hash = 0;
+  for (const ch of String(name)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return parseInt(teamColor(hash % 10).replace('#', ''), 16);
 }
 
 // --- Définition des commandes -----------------------------------------
@@ -53,6 +64,18 @@ const commandBuilders = [
     .addSubcommand((sub) => sub.setName('classement').setDescription('Voir le classement d\'une ligue')
       .addStringOption((opt) => opt.setName('nom').setDescription('Nom de la ligue').setRequired(true)))
     .addSubcommand((sub) => sub.setName('liste').setDescription('Lister les ligues de ce serveur')),
+
+  new SlashCommandBuilder().setName('carte')
+    .setDescription('Carte pilote façon carte de visite')
+    .addStringOption((opt) => opt.setName('pilote').setDescription('Nom du pilote (par défaut : toi, si tu es lié via /lier)')),
+
+  new SlashCommandBuilder().setName('defi')
+    .setDescription('Défi de la semaine sur un circuit, avec classement automatique')
+    .addSubcommand((sub) => sub.setName('creer').setDescription('Lancer un nouveau défi (remplace le défi en cours sur ce serveur)')
+      .addStringOption((opt) => opt.setName('circuit').setDescription('Circuit').setRequired(true).setAutocomplete(true))
+      .addIntegerOption((opt) => opt.setName('duree').setDescription('Durée en jours (défaut 7)').setMinValue(1).setMaxValue(30)))
+    .addSubcommand((sub) => sub.setName('classement').setDescription('Voir le classement du défi en cours'))
+    .addSubcommand((sub) => sub.setName('terminer').setDescription('Terminer le défi en cours avant la fin (réservé à celui qui l\'a lancé)')),
 
   new SlashCommandBuilder().setName('config-annonces')
     .setDescription('[Admin] Définir le salon des annonces automatiques (nouveaux records)')
@@ -201,6 +224,67 @@ async function handleLigue(interaction) {
   }
 }
 
+async function handleCarte(interaction) {
+  const pilote = interaction.options.getString('pilote') || driverFromLink(interaction.user.id);
+  if (!pilote) return interaction.reply({ content: 'Précise un pilote, ou lie ton compte avec `/lier nom:<ton nom>`.', ephemeral: true });
+  const card = db.driverCard(pilote);
+  if (!card) return interaction.reply(`Aucune donnée pour **${pilote}**.`);
+  const embed = new EmbedBuilder().setColor(pilotColor(pilote))
+    .setTitle(`🏎️ ${pilote}`)
+    .setDescription(`\`${initials(pilote)}\` · Carte pilote`)
+    .addFields(
+      { name: 'Meilleur tour', value: `\`${formatLapTime(card.bestOverall)}\``, inline: true },
+      { name: 'Tours enregistrés', value: String(card.totalLaps), inline: true },
+      { name: 'Circuits pilotés', value: String(card.tracksDriven), inline: true },
+      { name: 'Circuit favori', value: card.favorite ? `${card.favorite.track_name || trackName(card.favorite.track_id)} (${card.favorite.laps} tours)` : '—', inline: true },
+      { name: 'Records détenus', value: String(card.recordsHeld), inline: true },
+    );
+  if (card.lastLap) {
+    embed.addFields({
+      name: 'Dernier tour',
+      value: `\`${formatLapTime(card.lastLap.lap_time_ms)}\` — ${card.lastLap.track_name || trackName(card.lastLap.track_id)} · <t:${Math.floor(card.lastLap.recorded_at / 1000)}:R>`,
+    });
+  }
+  return interaction.reply({ embeds: [embed] });
+}
+
+async function handleDefi(interaction) {
+  const sub = interaction.options.getSubcommand();
+
+  if (sub === 'creer') {
+    const circuit = interaction.options.getString('circuit', true);
+    const trackId = trackIdByName(circuit);
+    if (trackId === null) return interaction.reply({ content: `Circuit inconnu : "${circuit}".`, ephemeral: true });
+    const duree = interaction.options.getInteger('duree') || 7;
+    db.createChallenge({ guildId: interaction.guildId, trackId, trackName: circuit, createdBy: interaction.user.id, durationDays: duree });
+    const challenge = db.getActiveChallenge(interaction.guildId);
+    const embed = new EmbedBuilder().setColor(ACCENT).setTitle(`🏆 Défi de la semaine lancé — ${circuit}`)
+      .setDescription(`Lancé par <@${interaction.user.id}>.\nTous les tours chronométrés sur ce circuit pendant la période comptent automatiquement — pas besoin de les soumettre.\nSuis le classement avec \`/defi classement\`.`)
+      .addFields({ name: 'Se termine', value: `<t:${Math.floor(challenge.ends_at / 1000)}:R>` });
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (sub === 'classement') {
+    const challenge = db.getActiveChallenge(interaction.guildId);
+    if (!challenge) return interaction.reply('Aucun défi en cours sur ce serveur. Lance-en un avec `/defi creer`.');
+    const rows = db.challengeLeaderboard(challenge.id, 10);
+    const label = challenge.track_name || trackName(challenge.track_id);
+    if (!rows.length) return interaction.reply(`Aucun tour enregistré pour le moment sur **${label}** depuis le début du défi.`);
+    const embed = new EmbedBuilder().setColor(ACCENT).setTitle(`🏁 Défi de la semaine — ${label}`)
+      .setDescription(rows.map((row, i) => `**${i + 1}.** ${row.driver_name} — \`${formatLapTime(row.lap_time_ms)}\``).join('\n'))
+      .addFields({ name: 'Se termine', value: `<t:${Math.floor(challenge.ends_at / 1000)}:R>` });
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (sub === 'terminer') {
+    const challenge = db.getActiveChallenge(interaction.guildId);
+    if (!challenge) return interaction.reply({ content: 'Aucun défi en cours sur ce serveur.', ephemeral: true });
+    if (challenge.created_by !== interaction.user.id) return interaction.reply({ content: 'Seul celui qui a lancé le défi peut le terminer.', ephemeral: true });
+    db.closeChallenge(challenge.id);
+    return interaction.reply('Le défi en cours a été terminé.');
+  }
+}
+
 async function handleConfigAnnonces(interaction) {
   const channel = interaction.options.getChannel('salon', true);
   db.setAnnounceChannel(interaction.guildId, channel.id);
@@ -218,7 +302,7 @@ async function handleAnnonce(interaction) {
 
 const handlers = {
   chrono: handleChrono, record: handleRecord, historique: handleHistorique, stats: handleStats,
-  lier: handleLier, lobby: handleLobby, ligue: handleLigue,
+  lier: handleLier, lobby: handleLobby, ligue: handleLigue, defi: handleDefi, carte: handleCarte,
   'config-annonces': handleConfigAnnonces, annonce: handleAnnonce,
 };
 
