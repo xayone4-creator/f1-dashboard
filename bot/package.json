@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Le bot partage la même base de données que le dashboard (`data/apex.db`, créée automatiquement, via le SQLite intégré à Node.js — aucune dépendance à compiler, aucun Python ni outil de build nécessaire). Chaque tour validé dans le dashboard est enregistré et devient consultable depuis Discord.",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -23,3 +26,4 @@
     "dotenv": "^17.4.2"
   }
 }
+
