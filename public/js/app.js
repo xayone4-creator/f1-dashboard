@@ -294,8 +294,22 @@ function renderSnapshot(data) {
   $('#positionValue').textContent = position; $('#racePosition').textContent = position; $('#streamPosition').textContent = position;
   $('#gapFront').textContent = formatDelta(data.front); $('#gapBack').textContent = formatDelta(data.back);
   $('#raceFront').textContent = formatDelta(data.front);
+  renderFlag(data.cars, data.playerCarIndex);
   renderMap(data.cars, data.playerCarIndex, data.real);
   renderClassification(data.cars, data.playerCarIndex);
+}
+
+// Le drapeau FIA (vehicleFiaFlags) est propre à chaque voiture : c'est celui
+// montré au joueur, pas un drapeau global de course. -1/0 = aucun, 1 = vert,
+// 2 = bleu, 3 = jaune, 4 = rouge (spec UDP F1 25).
+const FLAG_LABELS = { '-1': ['VERT', 'flag-green'], 0: ['VERT', 'flag-green'], 1: ['VERT', 'flag-green'], 2: ['BLEU', 'flag-blue'], 3: ['JAUNE', 'flag-yellow'], 4: ['ROUGE', 'flag-red'] };
+function renderFlag(cars, playerIndex) {
+  const el = $('#raceFlag'); if (!el) return;
+  const player = cars?.find((car) => car.index === playerIndex);
+  const code = player?.status?.fiaFlag;
+  const [label, cls] = FLAG_LABELS[String(code)] || FLAG_LABELS['-1'];
+  el.textContent = label;
+  el.className = cls;
 }
 
 function renderSectorDeltas(data) {
@@ -390,7 +404,18 @@ function renderMap(cars, playerIndex, real) {
   let points = appState.trackOutline?.length > 3 ? appState.trackOutline.map((point) => ({ x: point.x, z: point.z })) : [];
   if (real && !appState.trackOutline) {
     const player = cars.find((car) => car.index === playerIndex);
-    if (player?.pos) { appState.mapTrail.push(player.pos); if (appState.mapTrail.length > 500) appState.mapTrail.shift(); }
+    if (player?.pos) {
+      const last = appState.mapTrail[appState.mapTrail.length - 1];
+      // Un redémarrage de session, un flashback ou un retour aux stands
+      // téléporte la voiture : sans ce garde-fou, le trait droit entre
+      // l'ancienne et la nouvelle position traversait la carte en plein
+      // milieu. Un déplacement réel entre deux échantillons ne dépasse
+      // jamais ~80m (même à 350 km/h à 20 Hz), donc au-delà c'est un saut.
+      const jumped = last && Math.hypot(player.pos.x - last.x, player.pos.z - last.z) > 80;
+      if (jumped) appState.mapTrail = [];
+      appState.mapTrail.push(player.pos);
+      if (appState.mapTrail.length > 500) appState.mapTrail.shift();
+    }
     if (appState.mapTrail.length > 20) points = appState.mapTrail;
   }
   const emptyState = $('#mapEmpty');
@@ -487,6 +512,50 @@ function drawEmptyChart(id, message) {
   for (let y = 1; y < 4; y++) { const py = height / 4 * y; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(width, py); ctx.stroke(); }
   ctx.fillStyle = '#737986'; ctx.font = '10px Inter, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(message, width / 2, height / 2);
 }
+
+// ---------------------------------------------------------------------------
+// Progression du record personnel par circuit (vue Historique)
+// ---------------------------------------------------------------------------
+function formatLapTimeShort(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const m = Math.floor(ms / 60000); const s = (ms % 60000) / 1000;
+  return `${m}:${s.toFixed(3).padStart(6, '0')}`;
+}
+async function loadTrackOptions() {
+  const select = $('#progressTrackSelect'); if (!select || select.dataset.loaded) return;
+  try {
+    const tracks = await (await fetch('/api/tracks')).json();
+    tracks.sort((a, b) => a.name.localeCompare(b.name));
+    select.innerHTML = tracks.map((track) => `<option value="${track.id}">${track.name}</option>`).join('');
+    select.dataset.loaded = '1';
+    const currentTrackId = appState.session?.trackId;
+    if (currentTrackId !== undefined && currentTrackId !== null && tracks.some((track) => track.id === currentTrackId)) {
+      select.value = String(currentTrackId);
+    }
+  } catch (err) { /* dashboard hors-ligne ou API indisponible : le sélecteur reste vide */ }
+}
+async function renderRecordProgression() {
+  const select = $('#progressTrackSelect'); if (!select || !select.value) { drawEmptyChart('progressChart', 'Sélectionne un circuit'); return; }
+  let data;
+  try {
+    data = await (await fetch(`/api/record-progression?trackId=${select.value}`)).json();
+  } catch (err) { drawEmptyChart('progressChart', 'Impossible de charger la progression'); return; }
+  const points = data.progression || [];
+  const emptyLabel = $('#progressEmptyLabel');
+  if (points.length < 2) {
+    if (emptyLabel) emptyLabel.textContent = points.length ? '1 seul temps enregistré pour l’instant' : 'Aucun temps enregistré sur ce circuit';
+    drawEmptyChart('progressChart', 'Roule quelques tours sur ce circuit pour voir ta progression');
+    return;
+  }
+  if (emptyLabel) emptyLabel.textContent = `${data.driverName} · ${points.length} amélioration${points.length > 1 ? 's' : ''}`;
+  const values = points.map((point) => point.lapTimeMs / 1000);
+  const xLabels = points.map((point) => new Date(point.recordedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
+  drawLineChart('progressChart', [{ values, color: '#9b6cff', fill: 'rgba(155,108,255,.16)' }], {
+    yFormat: (value) => formatLapTimeShort(value * 1000),
+    xLabels,
+  });
+}
+$('#progressTrackSelect')?.addEventListener('change', renderRecordProgression);
 
 function sampleAtRatio(samples, ratio) {
   if (!samples.length) return {};
@@ -663,6 +732,8 @@ function showView(view) {
     // Canvases inside a hidden view have a 0px drawing area. Two frames ensure
     // layout is committed before we calculate their internal resolution.
     requestAnimationFrame(() => requestAnimationFrame(renderCharts));
+  } else if (view === 'history') {
+    loadTrackOptions().then(() => requestAnimationFrame(() => requestAnimationFrame(renderRecordProgression)));
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }

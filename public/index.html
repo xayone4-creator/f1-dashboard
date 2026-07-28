@@ -110,7 +110,7 @@
 
       <section class="view" id="view-race">
         <div class="view-heading"><div><p class="eyebrow">RACE MODE <span></span> LIVE</p><h1>Course en direct</h1><p class="subtitle">Lecture immédiate des écarts, stratégies et alertes de course.</p></div><button class="primary-button" data-go-dashboard>Retour aux widgets</button></div>
-        <div class="race-layout"><article class="race-hero"><p>POSITION ACTUELLE</p><div><b class="mono" id="racePosition">P06</b><span><em class="green-dot"></em> +2 positions depuis le départ</span></div><div class="race-stats"><span><small>TOUR</small><b id="raceLap">17 / 27</b></span><span><small>GAP DEVANT</small><b class="mono" id="raceFront">+0.812</b></span><span><small>PÉNALITÉS</small><b>—</b></span><span><small>DRAPEAU</small><b class="flag-green">VERT</b></span></div></article><article class="classification-card"><div class="card-title"><b>CLASSEMENT</b><span>LIVE</span></div><div id="raceClassification" class="classification"></div></article><article class="race-chart-card"><div class="card-title"><b>RYTHME SUR 10 TOURS</b><span>SECONDES</span></div><canvas class="line-canvas" id="racePaceChart"></canvas></article><article class="strategy-card"><div class="card-title"><b>STRATÉGIE</b><span>ESTIMATION</span></div><div class="strategy-line"><i></i><span class="soft-dot">S</span><b>6 tours</b><span class="medium-dot">M</span><b>21 tours</b></div><p>Fenêtre d’arrêt estimée : <b>tour 18 — 20</b></p></article></div>
+        <div class="race-layout"><article class="race-hero"><p>POSITION ACTUELLE</p><div><b class="mono" id="racePosition">P06</b><span><em class="green-dot"></em> +2 positions depuis le départ</span></div><div class="race-stats"><span><small>TOUR</small><b id="raceLap">17 / 27</b></span><span><small>GAP DEVANT</small><b class="mono" id="raceFront">+0.812</b></span><span><small>PÉNALITÉS</small><b>—</b></span><span><small>DRAPEAU</small><b id="raceFlag" class="flag-green">VERT</b></span></div></article><article class="classification-card"><div class="card-title"><b>CLASSEMENT</b><span>LIVE</span></div><div id="raceClassification" class="classification"></div></article><article class="race-chart-card"><div class="card-title"><b>RYTHME SUR 10 TOURS</b><span>SECONDES</span></div><canvas class="line-canvas" id="racePaceChart"></canvas></article><article class="strategy-card"><div class="card-title"><b>STRATÉGIE</b><span>ESTIMATION</span></div><div class="strategy-line"><i></i><span class="soft-dot">S</span><b>6 tours</b><span class="medium-dot">M</span><b>21 tours</b></div><p>Fenêtre d’arrêt estimée : <b>tour 18 — 20</b></p></article></div>
       </section>
 
       <section class="view" id="view-qualifying">
@@ -171,6 +171,13 @@
       <section class="view" id="view-history">
         <div class="view-heading"><div><p class="eyebrow">DATA LAB <span></span> SESSION ACTUELLE</p><h1>Historique des tours</h1><p class="subtitle">Sélectionne un tour pour l’envoyer dans l’analyse.</p></div><button class="primary-button" data-view="analysis">Ouvrir l’analyse</button></div>
         <article class="history-card"><div class="history-head"><span>TOUR</span><span>TEMPS</span><span>S1</span><span>S2</span><span>S3</span><span>PNEUS</span><span>USURE</span><span>DELTA</span><span></span></div><div id="historyRows"></div></article>
+        <article class="analysis-chart-card" style="margin-top:15px;">
+          <div class="chart-header">
+            <div><b>PROGRESSION DU RECORD</b><span id="progressEmptyLabel"></span></div>
+            <div class="analysis-select"><span>CIRCUIT</span><select id="progressTrackSelect"></select></div>
+          </div>
+          <div class="chart-canvas-wrap"><canvas class="line-canvas" id="progressChart" aria-label="Évolution du record personnel dans le temps"></canvas></div>
+        </article>
       </section>
 
       <section class="view" id="view-settings">

@@ -1,5 +1,14 @@
 'use strict';
 
+// Preset d'affichage : ?preset=compact ou ?preset=complet dans l'URL du
+// browser source OBS. Deux browser sources (une par preset) dans des scènes
+// différentes permettent de changer de mise en page juste en changeant de
+// scène dans OBS, sans rien reconfigurer.
+(function applyPreset() {
+  const preset = new URLSearchParams(location.search).get('preset');
+  if (preset === 'compact') document.documentElement.classList.add('compact');
+})();
+
 function formatLapTime(ms) {
   if (!ms || ms <= 0) return '—';
   const m = Math.floor(ms / 60000);

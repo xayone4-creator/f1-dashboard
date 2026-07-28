@@ -23,12 +23,7 @@ try {
   // démarrer tant que Node n'est pas mis à jour (voir bot/README.md).
 }
 
-// Sur Railway, le bot tourne seul (pas à côté du dashboard) : sa base est
-// donc la sienne, propre. DB_PATH est surchargeable via la variable d'env
-// DB_PATH pour la faire pointer vers un Volume Railway monté (persistance
-// entre les redéploiements) — sinon elle reste dans bot/data/apex.db, qui
-// sera réinitialisée à chaque redéploiement si aucun Volume n'est attaché.
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'apex.db');
+const DB_PATH = path.join(__dirname, '..', 'data', 'apex.db');
 
 let db = null;
 
@@ -116,6 +111,10 @@ function ensureDb() {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_challenges_guild ON challenges(guild_id, status);
+    CREATE TABLE IF NOT EXISTS bot_state (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
   // Nettoyage ponctuel : purge les tours à 0/négatifs enregistrés avant le
   // correctif du bug de coupure UDP (ils faussaient les classements en
@@ -189,6 +188,29 @@ function driverHistory(driverName, limit = 20) {
   return database.prepare(`
     SELECT * FROM laps WHERE driver_name = ? ORDER BY recorded_at DESC LIMIT ?
   `).all(driverName, limit);
+}
+
+// --- Progression du record par circuit --------------------------------
+// Renvoie uniquement les points où le record personnel a été amélioré
+// (courbe en escalier), avec la date de chaque amélioration — sert à
+// afficher "évolution de ton record sur ce circuit dans le temps".
+
+function recordProgression(driverName, trackId) {
+  const database = ensureDb(); if (!database) return [];
+  const rows = database.prepare(`
+    SELECT lap_time_ms, recorded_at FROM laps
+    WHERE driver_name = ? AND track_id = ?
+    ORDER BY recorded_at ASC
+  `).all(driverName, trackId);
+  const progression = [];
+  let best = null;
+  for (const row of rows) {
+    if (best === null || row.lap_time_ms < best) {
+      best = row.lap_time_ms;
+      progression.push({ recordedAt: row.recorded_at, lapTimeMs: row.lap_time_ms });
+    }
+  }
+  return progression;
 }
 
 function driverStats(driverName) {
@@ -280,6 +302,69 @@ function challengeLeaderboard(challengeId, limit = 10) {
 function closeChallenge(challengeId) {
   const database = ensureDb(); if (!database) return;
   database.prepare("UPDATE challenges SET status = 'closed' WHERE id = ?").run(challengeId);
+}
+
+// --- Petit stockage clé/valeur (utilisé pour retenir la date du dernier
+// récap hebdo envoyé, afin de ne pas le renvoyer deux fois après un
+// redémarrage du bot) -------------------------------------------------------
+
+function getBotState(key) {
+  const database = ensureDb(); if (!database) return null;
+  const row = database.prepare('SELECT value FROM bot_state WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setBotState(key, value) {
+  const database = ensureDb(); if (!database) return;
+  database.prepare(`
+    INSERT INTO bot_state (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(key, value);
+}
+
+// --- Récap hebdo -------------------------------------------------------
+// Calculé à la volée depuis `laps` sur une fenêtre de temps (pas de table
+// dédiée) : pilote le plus actif de la période + meilleure progression
+// (le plus gros gain personnel réalisé sur un circuit pendant la période).
+
+function weeklyRecap(sinceMs) {
+  const database = ensureDb(); if (!database) return null;
+
+  const mostActive = database.prepare(`
+    SELECT driver_name, COUNT(*) AS laps FROM laps WHERE recorded_at >= ? GROUP BY driver_name ORDER BY laps DESC LIMIT 1
+  `).get(sinceMs);
+
+  const totalLaps = database.prepare('SELECT COUNT(*) AS n FROM laps WHERE recorded_at >= ?').get(sinceMs);
+
+  const rows = database.prepare(`
+    SELECT driver_name, track_id, track_name, lap_time_ms, recorded_at
+    FROM laps WHERE recorded_at >= ? ORDER BY recorded_at ASC
+  `).all(sinceMs);
+
+  let bestProgress = null;
+  const priorBestCache = new Map();
+  for (const row of rows) {
+    const key = `${row.driver_name}|${row.track_id}`;
+    if (!priorBestCache.has(key)) {
+      const prior = database.prepare(`
+        SELECT MIN(lap_time_ms) AS best FROM laps WHERE driver_name = ? AND track_id = ? AND recorded_at < ?
+      `).get(row.driver_name, row.track_id, sinceMs);
+      priorBestCache.set(key, prior?.best ?? null);
+    }
+    const priorBest = priorBestCache.get(key);
+    if (priorBest != null && row.lap_time_ms < priorBest) {
+      const gain = priorBest - row.lap_time_ms;
+      if (!bestProgress || gain > bestProgress.gain) {
+        bestProgress = {
+          driverName: row.driver_name, trackName: row.track_name, trackId: row.track_id,
+          gain, newBest: row.lap_time_ms, priorBest,
+        };
+      }
+      priorBestCache.set(key, row.lap_time_ms);
+    }
+  }
+
+  return { mostActive: mostActive?.laps ? mostActive : null, bestProgress, totalLaps: totalLaps?.n || 0 };
 }
 
 // --- Ligues ------------------------------------------------------------
@@ -399,10 +484,11 @@ function listOpenLobbies(guildId) {
 }
 
 module.exports = {
-  isAvailable, recordLap, bestLaps, recordForTrack, driverHistory, driverStats, driverCard,
+  isAvailable, recordLap, bestLaps, recordForTrack, driverHistory, driverStats, driverCard, recordProgression,
   createLeague, joinLeague, leagueStandings, findLeagueByName, listLeagues,
   createLobby, setLobbyMessage, joinLobby, leaveLobby, getLobby, closeLobby,
   setAnnounceChannel, getAnnounceChannel, listAnnounceChannels, queueAnnouncement, consumePendingAnnouncements,
   linkDriver, linkedDriver, listOpenLobbies,
   createChallenge, getActiveChallenge, challengeLeaderboard, closeChallenge,
+  getBotState, setBotState, weeklyRecap,
 };

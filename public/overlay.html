@@ -46,6 +46,21 @@
   .speed-bar{height:6px;border-radius:4px;background:#1c1e26;margin-top:11px;overflow:hidden;}
   .speed-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green));width:0%;transition:width .12s ease;}
 
+  /* Preset compact : ?preset=compact dans l'URL du browser source OBS.
+     Ne garde que l'essentiel (position, nom, tour en cours, delta, meilleur
+     tour) pour un encombrement d'écran minimal. */
+  .compact .card{width:280px;padding:10px 14px 10px;}
+  .compact .sectors,
+  .compact .stat-row,
+  .compact .tyre-row,
+  .compact .speed-bar{display:none;}
+  .compact .sub-row{margin-top:6px;font-size:10px;}
+  .compact .lap-time-row .current{font-size:24px;}
+  .compact .lap-time-row .delta{font-size:18px;}
+  .compact #recordToast{width:320px;margin-left:-160px;padding:12px 16px;}
+  .compact #recordToast .toast-driver{font-size:16px;}
+  .compact #recordToast .toast-time{font-size:20px;}
+
   /* Notification de nouveau record */
   #recordToast{
     position:fixed;top:28px;left:50%;

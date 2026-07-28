@@ -1,12 +1,11 @@
 'use strict';
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const dgram = require('dgram');
 const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { parsePacket } = require('./f1Parser');
-const { createState, teamName, teamColor, trackName, MAX_SAMPLES_PER_LAP } = require('./state');
+const { createState, teamName, teamColor, trackName, MAX_SAMPLES_PER_LAP, TRACKS } = require('./state');
 const tracks = require('./tracks');
 const db = require('./db');
 
@@ -83,7 +82,13 @@ udpSocket.on('message', (msg) => {
         if (idx === state.playerCarIndex) {
           const trail = state.currentLapTrail;
           const last = trail[trail.length - 1];
-          if (!last || Math.abs(last.x - c.x) > 0.5 || Math.abs(last.z - c.z) > 0.5) {
+          // Même garde-fou que côté client (voir public/js/app.js#renderMap) :
+          // un redémarrage ou un flashback en cours de tour téléporte la
+          // voiture. Sans ça, ce tracé (potentiellement sauvegardé comme
+          // référence pour tout le monde via tracks.saveOutlineIfBetter)
+          // pourrait contenir un trait traversant toute la carte.
+          if (last && Math.hypot(last.x - c.x, last.z - c.z) > 80) trail.length = 0;
+          if (!trail.length || Math.abs(trail[trail.length - 1].x - c.x) > 0.5 || Math.abs(trail[trail.length - 1].z - c.z) > 0.5) {
             trail.push({ x: Math.round(c.x * 10) / 10, z: Math.round(c.z * 10) / 10 });
           }
         }
@@ -156,6 +161,23 @@ function pushSample(distance, telemetry, lapTimeMs) {
   if (samples.length > MAX_SAMPLES_PER_LAP) samples.shift();
 }
 
+// Envoi (facultatif) de chaque tour vers le bot Discord quand il est hébergé
+// ailleurs (Railway...) et ne partage donc plus le fichier SQLite local. Ne
+// fait rien si BOT_INGEST_URL / INGEST_SECRET ne sont pas renseignés dans le
+// .env à la racine — le dashboard continue de fonctionner à l'identique en
+// local dans ce cas. Volontairement "fire-and-forget" : si le bot ou le
+// réseau est indisponible, ça n'interrompt jamais l'enregistrement local.
+function pushLapToBot(lap) {
+  const url = process.env.BOT_INGEST_URL;
+  const secret = process.env.INGEST_SECRET;
+  if (!url || !secret) return;
+  fetch(`${url.replace(/\/$/, '')}/ingest/lap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Ingest-Secret': secret },
+    body: JSON.stringify(lap),
+  }).catch((err) => console.warn('[ingest] échec de l\'envoi du tour au bot distant:', err.message));
+}
+
 function notifyNewRecord({ driverName, trackName: track, lapTimeMs, previousBest }) {
   db.queueAnnouncement('new_record', { driverName, trackName: track, lapTimeMs, previousBest, at: Date.now() });
   broadcast({
@@ -194,41 +216,20 @@ function archiveLap(lapNumber, lapTimeMs, previousLap) {
   // enregistré en base pour alimenter /chrono, /record, /historique, etc.
   // Se dégrade en silence si better-sqlite3 n'est pas installé (voir server/db.js).
   const driverName = (state.participants && state.participants[state.playerCarIndex]?.name) || 'Pilote';
-  const saved = db.recordLap({
+  const lapPayload = {
     driverName,
     trackId: state.session?.trackId ?? null,
     trackName: state.session?.trackName || null,
     sessionType: state.session?.sessionType ?? null,
     lapTimeMs, sector1Ms: sector1 || null, sector2Ms: sector2 || null, sector3Ms: sector3 || null,
-  });
+  };
+  const saved = db.recordLap(lapPayload);
+  pushLapToBot(lapPayload);
   if (saved?.isNewRecord) notifyNewRecord({ driverName, trackName: state.session?.trackName, lapTimeMs, previousBest: saved.previousBest });
-  pushLapToBot({
-    driverName, trackId: state.session?.trackId ?? null, trackName: state.session?.trackName || null,
-    sessionType: state.session?.sessionType ?? null, lapTimeMs, sector1Ms: sector1 || null, sector2Ms: sector2 || null, sector3Ms: sector3 || null,
-  });
 
   const trackId = state.session && state.session.trackId;
   if (trackId !== undefined && tracks.saveOutlineIfBetter(trackId, trail)) {
     broadcast({ type: 'trackOutline', trackId, points: trail });
-  }
-}
-
-// Envoie le tour au bot Discord (hébergé sur Railway, donc sans accès au
-// disque local) via son API d'ingestion. Best-effort : ne bloque jamais la
-// boucle UDP, et un échec (bot éteint, pas d'internet...) est juste loggé.
-async function pushLapToBot(lap) {
-  const url = process.env.BOT_INGEST_URL;
-  const secret = process.env.BOT_INGEST_SECRET;
-  if (!url || !secret) return; // non configuré : le dashboard fonctionne quand même en local
-  try {
-    const res = await fetch(`${url.replace(/\/$/, '')}/api/laps`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-ingest-secret': secret },
-      body: JSON.stringify(lap),
-    });
-    if (!res.ok) console.warn(`[bot-sync] réponse ${res.status} du bot Railway`);
-  } catch (err) {
-    console.warn('[bot-sync] échec envoi du tour au bot Railway:', err.message);
   }
 }
 
@@ -242,6 +243,20 @@ udpSocket.bind(UDP_PORT, () => {
 const app = express();
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+app.get('/api/tracks', (req, res) => {
+  res.json(Object.entries(TRACKS).map(([id, name]) => ({ id: Number(id), name })));
+});
+
+app.get('/api/record-progression', (req, res) => {
+  const trackId = Number(req.query.trackId);
+  if (!Number.isFinite(trackId)) { res.status(400).json({ error: 'trackId requis' }); return; }
+  const driverName = req.query.driverName
+    || (state.participants && state.participants[state.playerCarIndex]?.name)
+    || null;
+  if (!driverName) { res.status(400).json({ error: 'Aucun pilote actif détecté — précise driverName.' }); return; }
+  res.json({ driverName, trackId, progression: db.recordProgression(driverName, trackId) });
+});
+
 const server = app.listen(HTTP_PORT, () => {
   console.log(`[HTTP] dashboard disponible sur http://localhost:${HTTP_PORT}`);
   console.log(`[HTTP] overlay OBS disponible sur http://localhost:${HTTP_PORT}/overlay.html`);
@@ -250,7 +265,18 @@ const server = app.listen(HTTP_PORT, () => {
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 function buildLiveSnapshot() {
-  const cars = Object.entries(state.cars).map(([idx, c]) => {
+  const cars = Object.entries(state.cars)
+    .filter(([idx]) => {
+      // Le jeu envoie des données de motion pour les 22 emplacements même
+      // quand une session en compte moins (lobby privé, IA désactivées...).
+      // Sans ce filtre, ces emplacements vides s'affichaient comme des
+      // voitures fantômes regroupées au centre de la carte (position 0,0
+      // par défaut). On ne garde que les emplacements ayant un participant
+      // réel (nom non vide) — voir server/f1Parser.js#parseParticipants.
+      const p = state.participants && state.participants[parseInt(idx, 10)];
+      return p && p.name;
+    })
+    .map(([idx, c]) => {
     const i = parseInt(idx, 10);
     const p = (state.participants && state.participants[i]) || {};
     return {
